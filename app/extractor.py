@@ -16,7 +16,7 @@ Extract EVERY bill/row you can see (a register page may hold many). Rules:
 - taxable: amount subject to VAT (before VAT). exempt: non-taxable/exempt amount. vat: VAT amount (13% normally). total: grand total.
 - If the document shows only a total including VAT and no breakup, compute taxable = total/1.13 and vat = total - taxable.
 - Never invent values; leave empty/0 when unreadable.
-Return by calling the record_bills tool."""
+Always respond by calling the record_bills tool (use an empty list if no bill is visible)."""
 
 TOOL = {
     "name": "record_bills",
@@ -43,12 +43,16 @@ TOOL = {
                         "total": {"type": "number"},
                         "is_import_export": {"type": "boolean"},
                     },
-                    "required": ["bill_no", "party_name", "taxable", "vat", "total"],
+                    "required": ["bill_no", "date_bs", "date_ad", "party_name", "party_pan", "description",
+                                 "qty", "unit", "taxable", "exempt", "vat", "total", "is_import_export"],
+                    "additionalProperties": False,
                 },
             }
         },
         "required": ["bills"],
+        "additionalProperties": False,
     },
+    "strict": True,
 }
 
 
@@ -67,7 +71,8 @@ def extract_image(media_type: str, data: bytes, bill_type: str, client=None) -> 
         model=MODEL,
         max_tokens=8000,
         tools=[TOOL],
-        tool_choice={"type": "tool", "name": "record_bills"},
+        tool_choice={"type": "auto"},  # forced tool_choice is rejected (400) on Sonnet 5.5
+        output_config={"effort": "low"},  # plain transcription; keeps cost down
         messages=[{
             "role": "user",
             "content": [
