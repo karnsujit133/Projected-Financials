@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bill → Tally / IRD Register</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#f5f6f8;color:#222}
+header{background:#1f3a5f;color:#fff;padding:14px 20px}
+main{max-width:1250px;margin:auto;padding:16px}
+.card{background:#fff;border-radius:8px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px #0002}
+button{background:#1f3a5f;color:#fff;border:0;padding:9px 14px;border-radius:6px;cursor:pointer;margin:2px}
+button.sec{background:#5b6b7f}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border:1px solid #ddd;padding:2px}th{background:#eef1f5;position:sticky;top:0}
+td input{width:100%;box-sizing:border-box;border:0;padding:4px;min-width:70px}
+tr.bad{background:#fff1f0}.flags{color:#b42318;font-size:12px;min-width:160px}
+.drop{border:2px dashed #9aa7b8;padding:24px;text-align:center;border-radius:8px}
+label{margin-right:12px;font-size:13px}.set input{width:130px}
+#msg{color:#b42318;white-space:pre-line}
+</style></head><body>
+<header><h2 style="margin:0">Bill → Tally / IRD Register (Nepal)</h2></header>
+<main>
+<div class="card">
+  <label><input type="radio" name="t" value="sales" checked> Sales</label>
+  <label><input type="radio" name="t" value="purchase"> Purchase</label>
+  <div class="drop" id="drop">Drop bill photos / scans / PDFs here, or
+    <input type="file" id="files" multiple accept="image/*,application/pdf" capture="environment"></div>
+  <button onclick="extract()">Extract data</button> <span id="status"></span><div id="msg"></div>
+</div>
+<div class="card set"><b>Tally settings</b><br>
+  <label>Company <input id="company"></label><label>Sales ledger <input id="sl" value="Sales"></label>
+  <label>Purchase ledger <input id="pl" value="Purchase"></label><label>VAT ledger <input id="vl" value="VAT"></label>
+  <label>VAT % <input id="vr" value="13" style="width:50px"></label></div>
+<div class="card"><b>Review &amp; edit</b> (red rows need checking)
+  <div style="overflow:auto;max-height:55vh"><table id="tbl"></table></div>
+  <button class="sec" onclick="addRow()">+ Row</button><button class="sec" onclick="revalidate()">Re-check</button><hr>
+  <button onclick="exp('ird?fmt=xlsx','xlsx')">IRD Register (Excel)</button>
+  <button onclick="exp('ird?fmt=csv','csv')">IRD Register (CSV)</button>
+  <button onclick="exp('tally-xml','xml')">Tally XML</button>
+  <button onclick="exp('excel','xlsx')">Tally Excel</button></div>
+</main>
+<script>
+const F=[["bill_no","Bill No"],["date_bs","Date BS"],["party_name","Party"],["party_pan","PAN"],["description","Description"],["qty","Qty"],["unit","Unit"],["taxable","Taxable"],["exempt","Exempt"],["vat","VAT"],["total","Total"]];
+const NUM=new Set(["qty","taxable","exempt","vat","total"]);
+let bills=[];
+const $=id=>document.getElementById(id);
+const type=()=>document.querySelector('input[name=t]:checked').value;
+const settings=()=>({company:$('company').value,sales_ledger:$('sl').value,purchase_ledger:$('pl').value,vat_ledger:$('vl').value,vat_rate:+$('vr').value||13});
+for(const k of ['company','sl','pl','vl','vr']){const v=localStorage.getItem('s_'+k);if(v)$(k).value=v;$(k).onchange=()=>localStorage.setItem('s_'+k,$(k).value)}
+function render(){
+  const esc=s=>String(s??'').replace(/"/g,'&quot;');
+  $('tbl').innerHTML='<tr><th>#</th>'+F.map(f=>`<th>${f[1]}</th>`).join('')+'<th>Issues</th><th></th></tr>'+
+  bills.map((b,i)=>`<tr class="${b.flags?.length?'bad':''}"><td>${i+1}</td>`+F.map(f=>`<td><input value="${esc(b[f[0]])}" onchange="upd(${i},'${f[0]}',this.value)"></td>`).join('')+
+  `<td class="flags">${(b.flags||[]).join('; ')}</td><td><button class="sec" onclick="bills.splice(${i},1);render()">×</button></td></tr>`).join('');}
+function upd(i,k,v){bills[i][k]=NUM.has(k)?(parseFloat(v)||0):v}
+function addRow(){bills.push({type:type(),bill_no:'',date_bs:'',date_ad:'',party_name:'',party_pan:'',description:'',qty:0,unit:'',taxable:0,exempt:0,vat:0,total:0,is_import_export:false,flags:[]});render()}
+async function extract(){
+  const fs=$('files').files;if(!fs.length){$('msg').textContent='Choose files first';return}
+  const fd=new FormData();for(const f of fs)fd.append('files',f);fd.append('bill_type',type());
+  $('status').textContent='Reading bills… (may take a minute)';$('msg').textContent='';
+  try{const r=await fetch('/api/extract',{method:'POST',body:fd});const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||r.status);
+    bills=bills.concat(j.bills);$('msg').textContent=j.errors.join('\n');render();$('status').textContent=`${j.bills.length} bill(s) found — please review`;
+  }catch(e){$('status').textContent='';$('msg').textContent='Error: '+e.message}}
+async function revalidate(){const r=await fetch('/api/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bills,settings:settings()})});bills=(await r.json()).bills;render()}
+async function exp(path,ext){
+  if(!bills.length)return alert('No data');
+  const r=await fetch('/api/export/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bills,settings:settings()})});
+  if(!r.ok)return alert('Export failed');
+  const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download=(r.headers.get('Content-Disposition')||'').match(/filename="(.+)"/)?.[1]||'export.'+ext;a.click()}
+$('drop').ondragover=e=>e.preventDefault();$('drop').ondrop=e=>{e.preventDefault();$('files').files=e.dataTransfer.files};
+</script></body></html>

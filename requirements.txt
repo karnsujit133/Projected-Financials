@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+anthropic
+pymupdf
+openpyxl
+pydantic
+nepali-datetime
+python-multipart
+pytest
+httpx
